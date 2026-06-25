@@ -44,8 +44,10 @@ type CategoryTotal struct {
 }
 
 type RecurringVendorSummary struct {
-	Count        int
-	MonthlyTotal float64
+	Count           int
+	ConfiguredCount int
+	MonthlyTotal    float64
+	ConfiguredTotal float64
 }
 
 type TemplateData struct {
@@ -185,8 +187,10 @@ func recurringVendorSummary(txs []*monarch.Transaction, vendors []RecurringVendo
 		return nil
 	}
 	vendorSet := make(map[string]float64, len(vendors))
+	var configuredTotal float64
 	for _, v := range vendors {
 		vendorSet[strings.ToLower(v.Name)] = v.MonthlyBudget
+		configuredTotal += v.MonthlyBudget
 	}
 
 	cutoff := time.Now().AddDate(0, -1, 0)
@@ -209,8 +213,10 @@ func recurringVendorSummary(txs []*monarch.Transaction, vendors []RecurringVendo
 		}
 	}
 	return &RecurringVendorSummary{
-		Count:        len(seen),
-		MonthlyTotal: monthlyTotal,
+		Count:           len(seen),
+		ConfiguredCount: len(vendors),
+		MonthlyTotal:    monthlyTotal,
+		ConfiguredTotal: configuredTotal,
 	}
 }
 
@@ -343,6 +349,27 @@ func main() {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", handleDashboard(tmpl, cache, cfg))
+	mux.HandleFunc("/merchants", func(w http.ResponseWriter, r *http.Request) {
+		cache.mu.RLock()
+		txs := cache.Transactions
+		cache.mu.RUnlock()
+		seen := map[string]bool{}
+		var names []string
+		for _, tx := range txs {
+			if tx.Merchant == nil {
+				continue
+			}
+			if !seen[tx.Merchant.Name] {
+				seen[tx.Merchant.Name] = true
+				names = append(names, tx.Merchant.Name)
+			}
+		}
+		sort.Strings(names)
+		w.Header().Set("Content-Type", "text/plain")
+		for _, n := range names {
+			fmt.Fprintln(w, n)
+		}
+	})
 
 	log.Printf("Listening on http://localhost:%s", port)
 	if err := http.ListenAndServe(":"+port, mux); err != nil {

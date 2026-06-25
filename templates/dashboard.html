@@ -306,11 +306,11 @@
 <div class="recurring-tile">
     <div class="stats-row">
         <div>
-            <div class="stat">{{.RecurringVendorSummary.Count}}</div>
+            <div class="stat">{{.RecurringVendorSummary.Count}}/{{.RecurringVendorSummary.ConfiguredCount}}</div>
             <div class="stat-label">Vendors active</div>
         </div>
         <div>
-            <div class="stat positive">{{.RecurringVendorSummary.MonthlyTotal | formatMoney}}</div>
+            <div class="stat positive">{{.RecurringVendorSummary.MonthlyTotal | formatMoney}}/{{.RecurringVendorSummary.ConfiguredTotal | formatMoney}}</div>
             <div class="stat-label">Monthly total</div>
         </div>
     </div>
