@@ -1,4 +1,3 @@
 # TODO
-- Data is pulled every x minutes, change that to a configurable value, use 
-  an environment variable named DURBO_DATA_PULL_MINUTES, the default, if
-  the value is not set can be five minutes.
+- Show dollar amounts with the legend text to the right of the pie graph
+- Include commas between groups of 3 digits with dollar amounts

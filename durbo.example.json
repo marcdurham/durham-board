@@ -1,0 +1,13 @@
+{
+  "pie_chart_exclude_categories": ["Transfer", "Cash & ATM", "Credit Card Payment"],
+  "recurring_vendors": [
+    {
+      "name": "Whole Foods",
+      "monthly_budget": 400.00
+    },
+    {
+      "name": "Amazon",
+      "monthly_budget": 50.00
+    }
+  ]
+}

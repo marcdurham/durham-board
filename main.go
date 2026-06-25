@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"html/template"
 	"log"
@@ -9,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -16,7 +18,17 @@ import (
 )
 
 const sessionFile = ".monarch_session"
-const cacheTTL = 5 * time.Minute
+const defaultPullMinutes = 5
+
+type Config struct {
+	PieChartExcludeCategories []string        `json:"pie_chart_exclude_categories"`
+	RecurringVendors          []RecurringVendor `json:"recurring_vendors"`
+}
+
+type RecurringVendor struct {
+	Name          string  `json:"name"`
+	MonthlyBudget float64 `json:"monthly_budget"`
+}
 
 type Cache struct {
 	mu           sync.RWMutex
@@ -31,13 +43,47 @@ type CategoryTotal struct {
 	Total float64
 }
 
+type RecurringVendorSummary struct {
+	Count        int
+	MonthlyTotal float64
+}
+
 type TemplateData struct {
-	Accounts       []*monarch.Account
-	Transactions   []*monarch.Transaction
-	LastUpdated    time.Time
-	Error          string
-	RefreshSecs    int
-	CategoryTotals []CategoryTotal
+	Accounts               []*monarch.Account
+	Transactions           []*monarch.Transaction
+	LastUpdated            time.Time
+	Error                  string
+	RefreshSecs            int
+	RefreshMins            int
+	CategoryTotals         []CategoryTotal
+	RecurringVendorSummary *RecurringVendorSummary
+}
+
+func loadConfig(path string) (*Config, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return &Config{}, nil
+		}
+		return nil, err
+	}
+	defer f.Close()
+	var cfg Config
+	if err := json.NewDecoder(f).Decode(&cfg); err != nil {
+		return nil, fmt.Errorf("parsing config: %w", err)
+	}
+	return &cfg, nil
+}
+
+func pullInterval() time.Duration {
+	if v := os.Getenv("DURBO_DATA_PULL_MINUTES"); v != "" {
+		var mins int
+		if _, err := fmt.Sscan(v, &mins); err == nil && mins > 0 {
+			return time.Duration(mins) * time.Minute
+		}
+		log.Printf("warning: invalid DURBO_DATA_PULL_MINUTES=%q, using default %d min", v, defaultPullMinutes)
+	}
+	return defaultPullMinutes * time.Minute
 }
 
 func refreshCache(ctx context.Context, client *monarch.Client, cache *Cache) error {
@@ -74,7 +120,9 @@ func refreshCache(ctx context.Context, client *monarch.Client, cache *Cache) err
 }
 
 func startRefreshLoop(ctx context.Context, client *monarch.Client, cache *Cache) {
-	ticker := time.NewTicker(cacheTTL)
+	interval := pullInterval()
+	log.Printf("Cache refresh interval: %v", interval)
+	ticker := time.NewTicker(interval)
 	go func() {
 		defer ticker.Stop()
 		for {
@@ -93,13 +141,21 @@ func startRefreshLoop(ctx context.Context, client *monarch.Client, cache *Cache)
 	}()
 }
 
-func categoryTotals(txs []*monarch.Transaction) []CategoryTotal {
+func categoryTotals(txs []*monarch.Transaction, exclude []string) []CategoryTotal {
+	excludeSet := make(map[string]bool, len(exclude))
+	for _, c := range exclude {
+		excludeSet[strings.ToLower(c)] = true
+	}
+
 	catMap := map[string]float64{}
 	for _, tx := range txs {
 		if tx.Amount < 0 {
 			name := "Uncategorized"
 			if tx.Category != nil {
 				name = tx.Category.Name
+			}
+			if excludeSet[strings.ToLower(name)] {
+				continue
 			}
 			catMap[name] += math.Abs(tx.Amount)
 		}
@@ -122,7 +178,44 @@ func categoryTotals(txs []*monarch.Transaction) []CategoryTotal {
 	return cats
 }
 
-func handleDashboard(tmpl *template.Template, cache *Cache) http.HandlerFunc {
+// recurringVendorSummary returns a count and monthly total for recurring vendors
+// found in the last 30 days of transactions.
+func recurringVendorSummary(txs []*monarch.Transaction, vendors []RecurringVendor) *RecurringVendorSummary {
+	if len(vendors) == 0 {
+		return nil
+	}
+	vendorSet := make(map[string]float64, len(vendors))
+	for _, v := range vendors {
+		vendorSet[strings.ToLower(v.Name)] = v.MonthlyBudget
+	}
+
+	cutoff := time.Now().AddDate(0, -1, 0)
+	seen := map[string]bool{}
+	var monthlyTotal float64
+	for _, tx := range txs {
+		if tx.Amount >= 0 {
+			continue
+		}
+		if tx.Date.Before(cutoff) {
+			continue
+		}
+		if tx.Merchant == nil {
+			continue
+		}
+		key := strings.ToLower(tx.Merchant.Name)
+		if budget, ok := vendorSet[key]; ok && !seen[key] {
+			seen[key] = true
+			monthlyTotal += budget
+		}
+	}
+	return &RecurringVendorSummary{
+		Count:        len(seen),
+		MonthlyTotal: monthlyTotal,
+	}
+}
+
+func handleDashboard(tmpl *template.Template, cache *Cache, cfg *Config) http.HandlerFunc {
+	refreshSecs := int(pullInterval().Seconds())
 	return func(w http.ResponseWriter, r *http.Request) {
 		cache.mu.RLock()
 		data := TemplateData{
@@ -130,11 +223,13 @@ func handleDashboard(tmpl *template.Template, cache *Cache) http.HandlerFunc {
 			Transactions: cache.Transactions,
 			LastUpdated:  cache.LastUpdated,
 			Error:        cache.Error,
-			RefreshSecs:  300,
+			RefreshSecs:  refreshSecs,
+			RefreshMins:  refreshSecs / 60,
 		}
 		cache.mu.RUnlock()
 
-		data.CategoryTotals = categoryTotals(data.Transactions)
+		data.CategoryTotals = categoryTotals(data.Transactions, cfg.PieChartExcludeCategories)
+		data.RecurringVendorSummary = recurringVendorSummary(data.Transactions, cfg.RecurringVendors)
 
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		if err := tmpl.Execute(w, data); err != nil {
@@ -145,6 +240,11 @@ func handleDashboard(tmpl *template.Template, cache *Cache) http.HandlerFunc {
 
 func main() {
 	ctx := context.Background()
+
+	cfg, err := loadConfig("durbo.json")
+	if err != nil {
+		log.Fatalf("loading config: %v", err)
+	}
 
 	token := os.Getenv("MONARCH_TOKEN")
 	email := os.Getenv("MONARCH_EMAIL")
@@ -158,7 +258,6 @@ func main() {
 	}
 
 	var client *monarch.Client
-	var err error
 
 	if token != "" {
 		client, err = monarch.NewClientWithToken(token)
@@ -211,7 +310,7 @@ func main() {
 	}
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/", handleDashboard(tmpl, cache))
+	mux.HandleFunc("/", handleDashboard(tmpl, cache, cfg))
 
 	log.Printf("Listening on http://localhost:%s", port)
 	if err := http.ListenAndServe(":"+port, mux); err != nil {

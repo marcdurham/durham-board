@@ -143,6 +143,32 @@
             max-width: 600px;
             margin: 0 auto;
         }
+
+        /* Recurring vendors tile */
+        .recurring-tile {
+            background: #fff;
+            border-radius: 10px;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+            padding: 20px 24px;
+            margin-bottom: 32px;
+            display: inline-block;
+            min-width: 220px;
+        }
+        .recurring-tile .stat {
+            font-size: 2rem;
+            font-weight: 700;
+            color: #1a1a2e;
+        }
+        .recurring-tile .stat-label {
+            font-size: 0.78rem;
+            color: #666;
+            margin-top: 2px;
+        }
+        .recurring-tile .stats-row {
+            display: flex;
+            gap: 32px;
+            margin-top: 8px;
+        }
     </style>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -156,7 +182,7 @@
 <div class="meta">
     Last updated:
     {{if .LastUpdated.IsZero}}never{{else}}{{.LastUpdated.Format "Jan 2, 2006 3:04 PM"}}{{end}}
-    &nbsp;&bull;&nbsp; Auto-refreshes every 5 minutes
+    &nbsp;&bull;&nbsp; Auto-refreshes every {{.RefreshMins}} minutes
 </div>
 
 {{if .CategoryTotals}}
@@ -217,6 +243,22 @@
     });
 })();
 </script>
+{{end}}
+
+{{if .RecurringVendorSummary}}
+<h2>Recurring Vendors &mdash; Last 30 Days</h2>
+<div class="recurring-tile">
+    <div class="stats-row">
+        <div>
+            <div class="stat">{{.RecurringVendorSummary.Count}}</div>
+            <div class="stat-label">Vendors active</div>
+        </div>
+        <div>
+            <div class="stat positive">${{printf "%.2f" .RecurringVendorSummary.MonthlyTotal}}</div>
+            <div class="stat-label">Monthly total</div>
+        </div>
+    </div>
+</div>
 {{end}}
 
 <h2>Account Balances</h2>
