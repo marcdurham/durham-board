@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -59,6 +60,7 @@ type TemplateData struct {
 	RefreshMins            int
 	CategoryTotals         []CategoryTotal
 	RecurringVendorSummary *RecurringVendorSummary
+	PiePeriodDays          int
 }
 
 func loadConfig(path string) (*Config, error) {
@@ -264,7 +266,21 @@ func handleDashboard(tmpl *template.Template, cache *Cache, cfg *Config) http.Ha
 		}
 		cache.mu.RUnlock()
 
-		data.CategoryTotals = categoryTotals(data.Transactions, cfg.PieChartExcludeCategories)
+		pieDays := 90
+		if v := r.URL.Query().Get("pie_period_last_days"); v != "" {
+			if n, err := strconv.Atoi(v); err == nil && n > 0 {
+				pieDays = n
+			}
+		}
+		data.PiePeriodDays = pieDays
+		pieCutoff := time.Now().AddDate(0, 0, -pieDays)
+		var pieTxs []*monarch.Transaction
+		for _, tx := range data.Transactions {
+			if !tx.Date.Before(pieCutoff) {
+				pieTxs = append(pieTxs, tx)
+			}
+		}
+		data.CategoryTotals = categoryTotals(pieTxs, cfg.PieChartExcludeCategories)
 		data.RecurringVendorSummary = recurringVendorSummary(data.Transactions, cfg.RecurringVendors)
 
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
