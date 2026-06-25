@@ -145,6 +145,7 @@
         }
     </style>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2/dist/chartjs-plugin-datalabels.min.js"></script>
 </head>
 <body>
 
@@ -168,12 +169,13 @@
 <script>
 (function() {
     var labels = [{{range .CategoryTotals}}"{{.Name}}",{{end}}];
-    var amounts = [{{range .CategoryTotals}}{{printf "%.2f" .Total}},{{end}}];
+    var amounts = [{{range .CategoryTotals}}{{printf "%.2f" .Total}},{{end}}].map(Number);
     var colors = [
         "#4f86c6","#f4845f","#5cb85c","#e8b84b","#9b59b6",
         "#1abc9c","#e74c3c","#3498db","#f39c12","#2ecc71",
         "#e91e63","#00bcd4","#ff9800"
     ];
+    Chart.register(ChartDataLabels);
     new Chart(document.getElementById("categoryChart"), {
         type: "pie",
         data: {
@@ -192,10 +194,22 @@
                 tooltip: {
                     callbacks: {
                         label: function(ctx) {
-                            var total = ctx.dataset.data.reduce(function(a,b){return a+b;},0);
-                            var pct = ((ctx.raw / total) * 100).toFixed(1);
-                            return ctx.label + ": $" + ctx.raw.toFixed(2) + " (" + pct + "%)";
+                            var v = Number(ctx.raw);
+                            var total = ctx.dataset.data.reduce(function(a,b){return a+Number(b);},0);
+                            var pct = ((v / total) * 100).toFixed(1);
+                            return ctx.label + ": $" + v.toFixed(2) + " (" + pct + "%)";
                         }
+                    }
+                },
+                datalabels: {
+                    color: "#fff",
+                    font: { weight: "bold", size: 12 },
+                    formatter: function(value, ctx) {
+                        var v = Number(value);
+                        var total = ctx.dataset.data.reduce(function(a,b){return a+Number(b);},0);
+                        var pct = ((v / total) * 100);
+                        if (pct < 3) return "";
+                        return "$" + v.toFixed(0);
                     }
                 }
             }
