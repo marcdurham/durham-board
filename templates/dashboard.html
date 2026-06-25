@@ -138,10 +138,42 @@
             box-shadow: 0 1px 4px rgba(0,0,0,0.08);
             padding: 20px 24px;
             margin-bottom: 32px;
+            display: flex;
+            align-items: center;
+            gap: 32px;
         }
         .chart-wrapper {
-            max-width: 600px;
-            margin: 0 auto;
+            flex: 0 0 auto;
+            width: 340px;
+        }
+        .chart-legend {
+            list-style: none;
+            margin: 0;
+            padding: 0;
+            flex: 1 1 auto;
+        }
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 3px 0;
+            font-size: 0.92em;
+        }
+        .legend-amount {
+            min-width: 72px;
+            text-align: right;
+            font-weight: 600;
+            color: #333;
+        }
+        .legend-box {
+            display: inline-block;
+            width: 14px;
+            height: 14px;
+            border-radius: 3px;
+            flex-shrink: 0;
+        }
+        .legend-name {
+            color: #444;
         }
 
         /* Recurring vendors tile */
@@ -191,6 +223,7 @@
     <div class="chart-wrapper">
         <canvas id="categoryChart"></canvas>
     </div>
+    <ul id="chartLegend" class="chart-legend"></ul>
 </div>
 <script>
 (function() {
@@ -205,10 +238,7 @@
         return "$" + Math.round(value).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
     }
 
-    // Create legend labels with amounts
-    var labels = categoryNames.map(function(name, index) {
-        return name + " " + formatCurrency(amounts[index]);
-    });
+    var labels = categoryNames.slice();
 
     var colors = [
         "#4f86c6","#f4845f","#5cb85c","#e8b84b","#9b59b6",
@@ -230,7 +260,7 @@
         options: {
             responsive: true,
             plugins: {
-                legend: { position: "right" },
+                legend: { display: false },
                 tooltip: {
                     callbacks: {
                         label: function(ctx) {
@@ -254,6 +284,18 @@
                 }
             }
         }
+    });
+
+    // Build HTML legend: amount | color box | name
+    var legendEl = document.getElementById("chartLegend");
+    categoryNames.forEach(function(name, i) {
+        var li = document.createElement("li");
+        li.className = "legend-item";
+        li.innerHTML =
+            '<span class="legend-amount">' + formatCurrency(amounts[i]) + '</span>' +
+            '<span class="legend-box" style="background:' + colors[i % colors.length] + '"></span>' +
+            '<span class="legend-name">' + name + '</span>';
+        legendEl.appendChild(li);
     });
 })();
 </script>
