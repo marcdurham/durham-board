@@ -214,6 +214,36 @@ func recurringVendorSummary(txs []*monarch.Transaction, vendors []RecurringVendo
 	}
 }
 
+func formatMoney(v float64) string {
+	formatted := fmt.Sprintf("%.2f", v)
+	parts := strings.Split(formatted, ".")
+	intPart := parts[0]
+	decPart := parts[1]
+
+	// Handle negative sign
+	negative := false
+	if strings.HasPrefix(intPart, "-") {
+		negative = true
+		intPart = intPart[1:]
+	}
+
+	// Add commas from right to left
+	runes := []rune(intPart)
+	var result strings.Builder
+	for i, r := range runes {
+		if i > 0 && (len(runes)-i)%3 == 0 {
+			result.WriteRune(',')
+		}
+		result.WriteRune(r)
+	}
+
+	intPart = result.String()
+	if negative {
+		return "$-" + intPart + "." + decPart
+	}
+	return "$" + intPart + "." + decPart
+}
+
 func handleDashboard(tmpl *template.Template, cache *Cache, cfg *Config) http.HandlerFunc {
 	refreshSecs := int(pullInterval().Seconds())
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -299,7 +329,9 @@ func main() {
 
 	startRefreshLoop(ctx, client, cache)
 
-	tmpl, err := template.ParseFiles("templates/dashboard.html")
+	tmpl, err := template.New("dashboard.html").Funcs(template.FuncMap{
+		"formatMoney": formatMoney,
+	}).ParseFiles("templates/dashboard.html")
 	if err != nil {
 		log.Fatalf("parsing template: %v", err)
 	}

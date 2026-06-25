@@ -194,8 +194,22 @@
 </div>
 <script>
 (function() {
-    var labels = [{{range .CategoryTotals}}"{{.Name}}",{{end}}];
+    var categoryNames = [{{range .CategoryTotals}}"{{.Name}}",{{end}}];
     var amounts = [{{range .CategoryTotals}}{{printf "%.2f" .Total}},{{end}}].map(Number);
+
+    function formatCurrency(value) {
+        return "$" + value.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+    }
+
+    function formatInteger(value) {
+        return "$" + Math.round(value).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+    }
+
+    // Create legend labels with amounts
+    var labels = categoryNames.map(function(name, index) {
+        return name + " " + formatCurrency(amounts[index]);
+    });
+
     var colors = [
         "#4f86c6","#f4845f","#5cb85c","#e8b84b","#9b59b6",
         "#1abc9c","#e74c3c","#3498db","#f39c12","#2ecc71",
@@ -223,7 +237,7 @@
                             var v = Number(ctx.raw);
                             var total = ctx.dataset.data.reduce(function(a,b){return a+Number(b);},0);
                             var pct = ((v / total) * 100).toFixed(1);
-                            return ctx.label + ": $" + v.toFixed(2) + " (" + pct + "%)";
+                            return ctx.label + " (" + pct + "%)";
                         }
                     }
                 },
@@ -235,7 +249,7 @@
                         var total = ctx.dataset.data.reduce(function(a,b){return a+Number(b);},0);
                         var pct = ((v / total) * 100);
                         if (pct < 3) return "";
-                        return "$" + v.toFixed(0);
+                        return formatInteger(v);
                     }
                 }
             }
@@ -254,7 +268,7 @@
             <div class="stat-label">Vendors active</div>
         </div>
         <div>
-            <div class="stat positive">${{printf "%.2f" .RecurringVendorSummary.MonthlyTotal}}</div>
+            <div class="stat positive">{{.RecurringVendorSummary.MonthlyTotal | formatMoney}}</div>
             <div class="stat-label">Monthly total</div>
         </div>
     </div>
@@ -269,7 +283,7 @@
             <div class="account-card">
                 <div class="name" title="{{.DisplayName}}">{{.DisplayName}}</div>
                 <div class="balance {{if ge .CurrentBalance 0.0}}positive{{else}}negative{{end}}">
-                    ${{printf "%.2f" .CurrentBalance}}
+                    {{.CurrentBalance | formatMoney}}
                 </div>
             </div>
             {{end}}
@@ -303,7 +317,7 @@
                     {{if .Category}}<span class="category-pill">{{.Category.Name}}</span>{{else}}&mdash;{{end}}
                 </td>
                 <td class="amount-cell {{if lt .Amount 0.0}}negative{{else}}positive{{end}}">
-                    ${{printf "%.2f" .Amount}}
+                    {{.Amount | formatMoney}}
                 </td>
             </tr>
             {{end}}
