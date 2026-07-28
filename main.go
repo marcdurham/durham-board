@@ -222,6 +222,16 @@ func recurringVendorSummary(txs []*monarch.Transaction, vendors []RecurringVendo
 	}
 }
 
+// maskEmail hides everything before the @ in an email so it can be logged safely.
+// e.g. "alice+test@example.com" → "a***e@example.com"
+func maskEmail(email string) string {
+	at := strings.LastIndex(email, "@")
+	if at <= 1 {
+		return "***"
+	}
+	return string(email[0]) + "***" + email[at:]
+}
+
 func formatMoney(v float64) string {
 	formatted := fmt.Sprintf("%.2f", v)
 	parts := strings.Split(formatted, ".")
@@ -306,7 +316,17 @@ func main() {
 	sessionExists := sessionErr == nil
 
 	if token == "" && email == "" && !sessionExists {
-		log.Fatal("No credentials found. Set MONARCH_TOKEN, or MONARCH_EMAIL+MONARCH_PASSWORD, or provide a .monarch_session file.")
+		var hints []string
+	if token == "" {
+		hints = append(hints, "MONARCH_TOKEN=<your-api-token>")
+	}
+	if email == "" && password == "" {
+		hints = append(hints, "MONARCH_EMAIL=<email> and MONARCH_PASSWORD=<password>")
+	}
+	if !sessionExists {
+		hints = append(hints, "or place a .monarch_session file in the working directory")
+	}
+	log.Fatalf("No credentials found. Set one of:\n  %s", strings.Join(hints, "\n  "))
 	}
 
 	var client *monarch.Client
@@ -324,12 +344,27 @@ func main() {
 	}
 
 	if token == "" && !sessionExists {
-		if email == "" || password == "" {
-			log.Fatal("No session file found. Set MONARCH_EMAIL and MONARCH_PASSWORD to log in.")
+		var missing []string
+		if email == "" {
+			missing = append(missing, "MONARCH_EMAIL")
 		}
-		log.Println("No session file found — logging in...")
+		if password == "" {
+			missing = append(missing, "MONARCH_PASSWORD")
+		}
+		if len(missing) > 0 {
+			log.Fatalf("Missing credentials: %s. Set them as environment variables to log in.", strings.Join(missing, ", "))
+		}
+
+		maskedEmail := maskEmail(email)
+		log.Printf("No session file found — logging in as %s...", maskedEmail)
 		if err := client.Auth.LoginInteractive(ctx, email, password); err != nil {
-			log.Fatalf("login failed: %v", err)
+			errMsg := err.Error()
+			// Monarch returns 404 for invalid credentials (security measure).
+			// Surface a clearer message so users don't think the API is down.
+			if strings.Contains(errMsg, "status 404") {
+				log.Fatalf("Login failed for %s: Monarch returned HTTP 404. This usually means invalid email or password (Monarch uses 404 instead of 401 as a security measure). Verify your MONARCH_EMAIL and MONARCH_PASSWORD.", maskedEmail)
+			}
+			log.Fatalf("Login failed for %s: %v", maskedEmail, err)
 		}
 		if err := client.Auth.SaveSession(sessionFile); err != nil {
 			log.Printf("warning: could not save session: %v", err)

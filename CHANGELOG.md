@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-06-27
+
+- Add README.md with setup, auth, configuration, and environment variable docs
+
 ## 2026-06-25
 
 - Pie chart period defaults to last 90 days and is configurable via `?pie_period_last_days=N` query parameter
