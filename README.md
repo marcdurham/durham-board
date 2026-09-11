@@ -1,6 +1,6 @@
 # Durham Board
 
-A personal finance dashboard that pulls data from [Monarch Money](https://monarchmoney.com) and displays accounts, transactions, spending by category (pie chart), and recurring vendor tracking.
+A personal finance dashboard, designed to be displayed on a kiosk-like monitor or TV, that pulls data from [Monarch Money](https://monarchmoney.com) and displays accounts, transactions, spending by category (pie chart), and recurring vendor tracking.
 
 ## Features
 
