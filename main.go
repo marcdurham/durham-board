@@ -352,7 +352,8 @@ func main() {
 			missing = append(missing, "MONARCH_PASSWORD")
 		}
 		if len(missing) > 0 {
-			log.Fatalf("Missing credentials: %s. Set them as environment variables to log in.", strings.Join(missing, ", "))
+			log.Fatalf("Missing credentials: %s. Set them as environment variables to log in:\n  export %s\nThese are the email and password you use to log in to monarchmoney.com.\nIf you've forgotten your password, reset it at monarchmoney.com.",
+				strings.Join(missing, "="), strings.Join(missing, "="))
 		}
 
 		maskedEmail := maskEmail(email)
