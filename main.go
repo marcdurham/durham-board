@@ -22,7 +22,7 @@ const sessionFile = ".monarch_session"
 const defaultPullMinutes = 5
 
 type Config struct {
-	PieChartExcludeCategories []string        `json:"pie_chart_exclude_categories"`
+	PieChartExcludeCategories []string          `json:"pie_chart_exclude_categories"`
 	RecurringVendors          []RecurringVendor `json:"recurring_vendors"`
 }
 
@@ -300,6 +300,23 @@ func handleDashboard(tmpl *template.Template, cache *Cache, cfg *Config) http.Ha
 	}
 }
 
+// missingCredentials returns the env vars that must be set to authenticate.
+// A token or an existing session file is sufficient on its own; otherwise
+// both email and password are needed to log in.
+func missingCredentials(token, email, password string, sessionExists bool) []string {
+	if token != "" || sessionExists {
+		return nil
+	}
+	var missing []string
+	if email == "" {
+		missing = append(missing, "MONARCH_EMAIL")
+	}
+	if password == "" {
+		missing = append(missing, "MONARCH_PASSWORD")
+	}
+	return missing
+}
+
 func main() {
 	ctx := context.Background()
 
@@ -315,40 +332,17 @@ func main() {
 	_, sessionErr := os.Stat(sessionFile)
 	sessionExists := sessionErr == nil
 
-	if token == "" && !sessionExists {
-		// No token and no cached session: we cannot authenticate at all.
+	if missing := missingCredentials(token, email, password, sessionExists); len(missing) > 0 {
 		log.Printf("MONARCH_TOKEN = %q", token)
 		log.Printf("MONARCH_EMAIL = %q", email)
-		log.Printf("MONARCH_PASSWORD %s", func() string { if password == "" { return "(empty)" }; return "= set" }())
-		var missing []string
-		if token == "" {
-			missing = append(missing, "MONARCH_TOKEN")
-		}
-		if email == "" {
-			missing = append(missing, "MONARCH_EMAIL")
-		}
-		if password == "" {
-			missing = append(missing, "MONARCH_PASSWORD")
-		}
-		if len(missing) > 0 {
-			log.Fatalf("No credentials found. Set one of the following as environment variables:\n  %s\n  or place a valid .monarch_session file in the working directory\nThese are the email and password you use to log in to monarchmoney.com.",
-				strings.Join(missing, "\n  "))
-		}
-	}
-
-	if token == "" && !sessionExists {
-		// Session file is gone and no email/password given: cannot log in.
-		var missing []string
-		if email == "" {
-			missing = append(missing, "MONARCH_EMAIL")
-		}
-		if password == "" {
-			missing = append(missing, "MONARCH_PASSWORD")
-		}
-		if len(missing) > 0 {
-			log.Fatalf("No session file and missing credential(s): %s.\nSet them as environment variables to log in:\n  export %s\nThese are the email and password you use to log in to monarchmoney.com.\nIf you've forgotten your password, reset it at monarchmoney.com.",
-				strings.Join(missing, ", "), strings.Join(missing, "="))
-		}
+		log.Printf("MONARCH_PASSWORD %s", func() string {
+			if password == "" {
+				return "(empty)"
+			}
+			return "= set"
+		}())
+		log.Fatalf("No credentials found. Missing: %s.\nDo one of:\n  1. Set MONARCH_EMAIL and MONARCH_PASSWORD (the email and password you use to log in to monarchmoney.com)\n  2. Set MONARCH_TOKEN\n  3. Place a valid .monarch_session file in the working directory",
+			strings.Join(missing, ", "))
 	}
 
 	var client *monarch.Client
@@ -366,18 +360,6 @@ func main() {
 	}
 
 	if token == "" && !sessionExists {
-		var missing []string
-		if email == "" {
-			missing = append(missing, "MONARCH_EMAIL")
-		}
-		if password == "" {
-			missing = append(missing, "MONARCH_PASSWORD")
-		}
-		if len(missing) > 0 {
-			log.Fatalf("Missing credentials: %s. Set them as environment variables to log in:\n  export %s\nThese are the email and password you use to log in to monarchmoney.com.\nIf you've forgotten your password, reset it at monarchmoney.com.",
-				strings.Join(missing, "="), strings.Join(missing, "="))
-		}
-
 		maskedEmail := maskEmail(email)
 		log.Printf("No session file found — logging in as %s...", maskedEmail)
 		if err := client.Auth.LoginInteractive(ctx, email, password); err != nil {
@@ -400,7 +382,7 @@ func main() {
 	// Probe authentication up front so a stale/invalid session fails loudly
 	// here (with a clear message) instead of later as a confusing API error.
 	if err := refreshCache(ctx, client, cache); err != nil {
-		log.Fatalf("Authentication failed: %v.\n  If using a .monarch_session file, it is expired or invalid — log in again with MONARCH_EMAIL and MONARCH_PASSWORD to refresh it, or set MONARCH_TOKEN.\n  If using email/password, verify they are correct.", err)
+		log.Fatalf("Authentication failed: %v.\n  If using a .monarch_session file, it is expired or invalid — to log in again, delete or rename %s and run with MONARCH_EMAIL and MONARCH_PASSWORD set (a fresh session file will be saved), or set MONARCH_TOKEN.\n  If using email/password, verify they are correct.", err, sessionFile)
 	}
 	log.Printf("Loaded %d accounts and %d transactions", len(cache.Accounts), len(cache.Transactions))
 

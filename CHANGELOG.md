@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-09-24
+
+- Fix: email/password login was always rejected with "No credentials found" when no MONARCH_TOKEN was set; a token, a session file, or email+password now each suffice
+- Credential error now lists the three ways to authenticate; expired-session error says to delete/rename `.monarch_session` to log in again
+
 ## 2026-06-27
 
 - Add README.md with setup, auth, configuration, and environment variable docs
