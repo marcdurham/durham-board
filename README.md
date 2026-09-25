@@ -31,36 +31,39 @@ Open [http://localhost:8082](http://localhost:8082) in your browser.
 
 ## Authentication
 
-Monarch accounts and their auth tokens are stored in a local [Turso](https://turso.tech) database file, `durbo.db` (override the path with `DURBO_DB`). No session file is used. After the first successful login the token is saved and reused, and if it expires the app logs in again with the saved password and stores the new token — you don't have to log in by hand.
+Monarch accounts and their credentials are stored in a local [Turso](https://turso.tech) database file, `durbo.db` (override the path with `DURBO_DB`). No session file is used. Each account can have:
+
+- a **browser session cookie** (recommended) — Monarch's web app authenticates with an HttpOnly session cookie, and scripted password logins are often blocked by a CAPTCHA. A copied cookie reportedly lasts around 60 days.
+- an **email + password** — the app logs in, saves the resulting token, and reuses it across restarts. If the token expires it logs in again with the saved password and stores the new token.
 
 ### Managing accounts
 
 ```bash
+durham-board account cookie you@example.com  # paste your browser session cookie, makes it active
 durham-board account add you@example.com     # prompts for password, makes it active
-durham-board account list                    # * marks the active account
+durham-board account list                    # * marks the active one, and shows what is saved
 durham-board account use other@example.com   # switch accounts (restart the dashboard)
-durham-board account token you@example.com   # save a token directly (see CAPTCHA below)
 durham-board account remove other@example.com
 ```
 
-With `go run`, use `go run . account add you@example.com`.
+With `go run`, use `go run . account cookie you@example.com`.
 
 If only one account is saved it is used automatically; with several, pick one with `account use`.
 
+### Copying the session cookie
+
+1. Log in at <https://app.monarch.com> in a desktop browser (tick "Stay signed in" if offered).
+2. Open developer tools (F12, or Cmd+Option+I on a Mac) and select the **Network** tab.
+3. Reload the page, type `graphql` in the filter box, and click any request to `api.monarch.com/graphql`.
+4. Under **Request Headers**, find the `Cookie` header and copy its whole value (it contains `sessionid=...; csrftoken=...`).
+5. Run `durham-board account cookie you@example.com` and paste it at the prompt (a leading `Cookie:` is fine).
+
+When the cookie expires the dashboard shows an error; repeat these steps to save a fresh one.
+
 ### Environment variables (optional)
 
-- `MONARCH_EMAIL` + `MONARCH_PASSWORD` — if both are set, the account is saved to `durbo.db` and made active, so you can drop them afterwards.
+- `MONARCH_EMAIL` + `MONARCH_PASSWORD` — if both are set, the account is saved to `durbo.db` and made active on every start, so unset them afterwards if you want to switch accounts with `account use`.
 - `MONARCH_TOKEN` — use this token for this run instead of the stored account (not saved).
-
-### CAPTCHA
-
-Monarch sometimes requires a CAPTCHA for password logins, which the app can't solve. When that happens, save a token from your browser instead:
-
-1. Log in at <https://app.monarchmoney.com> in a desktop browser (solve the CAPTCHA there).
-2. Open developer tools (F12, or Cmd+Option+I on a Mac) and select the **Network** tab.
-3. Reload the page, type `graphql` in the filter box, and click any request to `api.monarchmoney.com/graphql`.
-4. Under **Request Headers**, find `Authorization: Token <long value>` and copy the long value after `Token `.
-5. Run `durham-board account token you@example.com` and paste it at the prompt (pasting the `Token ` prefix too is fine).
 
 ## Configuration
 
@@ -92,7 +95,7 @@ cp durbo.example.json durbo.json
 | Variable | Default | Description |
 |---|---|---|
 | `PORT` | `8082` | HTTP port to listen on |
-| `DURBO_DB` | `durbo.db` | Path to the local Turso database holding accounts and tokens |
+| `DURBO_DB` | `durbo.db` | Path to the local Turso database holding accounts, cookies and tokens |
 | `MONARCH_TOKEN` | — | Monarch Money API token (overrides the stored account for this run) |
 | `MONARCH_EMAIL` | — | Email to save to the database and make active (with `MONARCH_PASSWORD`) |
 | `MONARCH_PASSWORD` | — | Password to save to the database (with `MONARCH_EMAIL`) |
@@ -122,5 +125,5 @@ go build -o durham-board .
 
 ## Security notes
 
-- `durbo.db` contains your Monarch passwords and live auth tokens in plain text — it is gitignored by default. Do not commit or share it, and keep it on the local machine.
+- `durbo.db` contains your Monarch passwords, session cookies and live auth tokens in plain text — it is gitignored by default. Do not commit or share it, and keep it on the local machine.
 - `durbo.json` may contain personal financial category names — also gitignored.

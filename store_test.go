@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"errors"
 	"path/filepath"
 	"strings"
@@ -187,26 +188,26 @@ func TestAccountCommand(t *testing.T) {
 		t.Errorf("password not read from stdin, got %q", a.Password)
 	}
 
-	// Token-only account, e.g. when Monarch demands a CAPTCHA for password login.
-	if _, err := run(" tok123 \n", "token", "t@x.com"); err != nil {
+	// Cookie-only account, the usual case since Monarch blocks scripted logins.
+	if _, err := run("Cookie: sessionid=abc; csrftoken=def\n", "cookie", "t@x.com"); err != nil {
 		t.Fatal(err)
 	}
-	if a, _ := s.ActiveAccount(); a == nil || a.Email != "t@x.com" || a.Token != "tok123" || a.Password != "" {
-		t.Errorf("token command: got %+v", a)
+	if a, _ := s.ActiveAccount(); a == nil || a.Email != "t@x.com" || a.Cookie != "sessionid=abc; csrftoken=def" || a.Password != "" {
+		t.Errorf("cookie command: got %+v", a)
 	}
-	// A pasted "Token " header prefix is stripped.
-	if _, err := run("Token tok789\n", "token", "t@x.com"); err != nil {
+	// Setting a cookie on an existing account keeps its password.
+	if _, err := run("sessionid=x; csrftoken=y\n", "cookie", "b@x.com"); err != nil {
 		t.Fatal(err)
 	}
-	if a, _ := s.Account("t@x.com"); a.Token != "tok789" {
-		t.Errorf("Token prefix not stripped, got %q", a.Token)
+	if a, _ := s.Account("b@x.com"); a.Cookie != "sessionid=x; csrftoken=y" || a.Password != "pw2" {
+		t.Errorf("cookie on existing account: got %+v", a)
 	}
-	// Setting a token on an existing account keeps its password.
-	if _, err := run("tok456\n", "token", "b@x.com"); err != nil {
-		t.Fatal(err)
+	if out, _ := run("", "list"); !strings.Contains(out, "b@x.com (cookie, password)") {
+		t.Errorf("list should show what is saved:\n%s", out)
 	}
-	if a, _ := s.Account("b@x.com"); a.Token != "tok456" || a.Password != "pw2" {
-		t.Errorf("token on existing account: got %+v", a)
+	// Pasting something other than the Cookie header (e.g. an old token) is rejected.
+	if _, err := run("Token abc\n", "cookie", "t@x.com"); err == nil {
+		t.Error("value without sessionid should be rejected")
 	}
 
 	if _, err := run("", "use", "a@x.com"); err != nil {
@@ -230,5 +231,73 @@ func TestAccountCommand(t *testing.T) {
 	}
 	if out, _ := run("", "list"); strings.Contains(out, "a@x.com") {
 		t.Errorf("remove did not delete:\n%s", out)
+	}
+}
+
+// Regression: databases created before cookie auth have no cookie column and
+// must be upgraded in place without losing saved accounts.
+func TestOpenStoreMigratesOldSchema(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "old.db")
+	db, err := sql.Open("turso", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, stmt := range []string{
+		`CREATE TABLE accounts (email TEXT PRIMARY KEY, password TEXT NOT NULL DEFAULT '', token TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL DEFAULT '')`,
+		`INSERT INTO accounts (email, password, token) VALUES ('a@x.com', 'pw', 'tok')`,
+	} {
+		if _, err := db.Exec(stmt); err != nil {
+			t.Fatal(err)
+		}
+	}
+	db.Close()
+
+	for i := 0; i < 2; i++ { // reopening an already-migrated DB must also work
+		s, err := openStore(path)
+		if err != nil {
+			t.Fatalf("open %d: %v", i, err)
+		}
+		if err := s.SetCookie("a@x.com", "sessionid=1"); err != nil {
+			t.Fatal(err)
+		}
+		a, err := s.Account("a@x.com")
+		if err != nil || a.Password != "pw" || a.Token != "tok" || a.Cookie != "sessionid=1" {
+			t.Fatalf("got %+v, %v", a, err)
+		}
+		s.Close()
+	}
+}
+
+func TestAuthenticatorDoesNotReloginWithRejectedCookie(t *testing.T) {
+	s := newTestStore(t)
+	s.SaveAccount("a@x.com", "pw")
+	s.SetCookie("a@x.com", "sessionid=old")
+	acct, _ := s.Account("a@x.com")
+
+	auth := &authenticator{store: s, account: acct,
+		login: func(context.Context, string, string, bool) (string, error) {
+			t.Error("should not attempt password login when a cookie is saved")
+			return "", nil
+		}}
+	err := auth.do(context.Background(), false, func() error { return errors.New("not authenticated") })
+	if err == nil || !strings.Contains(err.Error(), "durham-board account cookie a@x.com") {
+		t.Errorf("error should say how to save a fresh cookie: %v", err)
+	}
+}
+
+func TestParseCookie(t *testing.T) {
+	for in, want := range map[string]string{
+		"sessionid=a; csrftoken=b":            "sessionid=a; csrftoken=b",
+		"  Cookie: sessionid=a; csrftoken=b ": "sessionid=a; csrftoken=b",
+		"cookie:sessionid=a":                  "sessionid=a",
+	} {
+		if got, err := parseCookie(in); err != nil || got != want {
+			t.Errorf("parseCookie(%q) = %q, %v; want %q", in, got, err, want)
+		}
+	}
+	for _, in := range []string{"", "Cookie:", "Token abc", "csrftoken=b"} {
+		if _, err := parseCookie(in); err == nil {
+			t.Errorf("parseCookie(%q) should fail", in)
+		}
 	}
 }

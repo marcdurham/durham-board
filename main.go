@@ -15,7 +15,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/eshaffer321/monarchmoney-go/pkg/monarch"
+	"github.com/eshaffer321/monarch-go/v2/pkg/monarch"
 )
 
 const defaultPullMinutes = 5
@@ -231,12 +231,7 @@ func loginFailedMessage(email string, err error) string {
 		return fmt.Sprintf("Login failed for %s: Monarch returned HTTP 404. This usually means invalid email or password (Monarch uses 404 instead of 401 as a security measure). Verify your MONARCH_EMAIL and MONARCH_PASSWORD.", email)
 	}
 	if strings.Contains(err.Error(), "CAPTCHA_REQUIRED") {
-		return fmt.Sprintf("Login failed for %s: Monarch is requiring a CAPTCHA, which can't be solved here. Save a token from your browser instead:\n"+
-			"  1. Log in at https://app.monarchmoney.com in a desktop browser (solve the CAPTCHA there).\n"+
-			"  2. Open developer tools (F12, or Cmd+Option+I on a Mac) and select the Network tab.\n"+
-			"  3. Reload the page, type graphql in the filter box, and click any request to api.monarchmoney.com/graphql.\n"+
-			"  4. Under Request Headers, find Authorization: Token <long value> and copy the long value after \"Token \".\n"+
-			"  5. Run: durham-board account token %s   and paste it at the prompt.", email, email)
+		return fmt.Sprintf("Login failed for %s: Monarch is requiring a CAPTCHA, which can't be solved here. Use your browser's session cookie instead.\n%s", email, cookieInstructions(email))
 	}
 	return fmt.Sprintf("Login failed for %s: %v", email, err)
 }
@@ -364,27 +359,27 @@ func main() {
 	}
 	token := os.Getenv("MONARCH_TOKEN")
 	if token == "" && account == nil {
-		log.Fatalf("No Monarch account configured in %s.\nDo one of:\n  1. Run: durham-board account add <email>   (saves email/password; the token is kept after the first login)\n  2. Set MONARCH_EMAIL and MONARCH_PASSWORD once (they are saved to %s)\n  3. Set MONARCH_TOKEN\nIf several accounts are saved, pick one with: durham-board account use <email>", dbPath(), dbPath())
+		log.Fatalf("No Monarch account configured in %s.\nDo one of:\n  1. Run: durham-board account cookie <email>   (saves your browser session cookie; most reliable)\n  2. Run: durham-board account add <email>   (saves email/password; Monarch often blocks this with a CAPTCHA)\n  3. Set MONARCH_EMAIL and MONARCH_PASSWORD once (they are saved to %s)\n  4. Set MONARCH_TOKEN\nIf several accounts are saved, pick one with: durham-board account use <email>", dbPath(), dbPath())
 	}
 
-	client, err := monarch.NewClient(&monarch.ClientOptions{Timeout: 30 * time.Second})
-	if err != nil {
-		log.Fatalf("creating monarch client: %v", err)
-	}
-
+	opts := &monarch.ClientOptions{Timeout: 30 * time.Second}
 	if token != "" {
 		log.Printf("Using MONARCH_TOKEN")
 		account = nil
-		client.SetToken(token)
+		opts.Token = token
 	} else {
 		log.Printf("Using account %s", account.Email)
-		if account.Token != "" {
-			client.SetToken(account.Token)
-		}
+		// The library prefers the cookie when both are set.
+		opts.Cookie = account.Cookie
+		opts.Token = account.Token
+	}
+	client, err := monarch.NewClient(opts)
+	if err != nil {
+		log.Fatalf("creating monarch client: %v", err)
 	}
 	auth := newAuthenticator(client, store, account)
 
-	if account != nil && account.Token == "" {
+	if account != nil && account.Cookie == "" && account.Token == "" {
 		if err := auth.relogin(ctx, true); err != nil {
 			log.Fatal(err)
 		}
@@ -395,7 +390,11 @@ func main() {
 	// here (with a clear message) instead of later as a confusing API error.
 	// A stored token that has expired is replaced by logging in again.
 	if err := auth.do(ctx, true, func() error { return refreshCache(ctx, client, cache) }); err != nil {
-		log.Fatalf("Loading data from Monarch failed: %v.\n  If the password changed, update it with: durham-board account add <email>\n  If using MONARCH_TOKEN, it may be expired.", err)
+		hint := "If using MONARCH_TOKEN, it may be expired."
+		if account != nil {
+			hint = cookieInstructions(account.Email)
+		}
+		log.Fatalf("Loading data from Monarch failed: %v\n%s", err, hint)
 	}
 	log.Printf("Loaded %d accounts and %d transactions", len(cache.Accounts), len(cache.Transactions))
 

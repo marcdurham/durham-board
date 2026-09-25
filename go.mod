@@ -3,7 +3,7 @@ module durham-board
 go 1.24.0
 
 require (
-	github.com/eshaffer321/monarchmoney-go v1.1.0
+	github.com/eshaffer321/monarch-go/v2 v2.1.0
 	golang.org/x/term v0.37.0
 	turso.tech/database/tursogo v0.7.2
 )

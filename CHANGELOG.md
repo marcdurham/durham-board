@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-09-25
+
+- Authenticate with a browser session cookie: Monarch's web app no longer sends an `Authorization: Token` header, so the previous copy-the-token instructions couldn't be followed. `account cookie <email>` saves the `Cookie` header (`sessionid=...; csrftoken=...`) per account; `account token` is removed
+- Upgrade to `github.com/eshaffer321/monarch-go/v2` v2.1.0 (cookie support, `api.monarch.com` endpoint)
+- CAPTCHA and expired-cookie errors give step-by-step instructions for copying the cookie from the browser's developer tools; a rejected cookie no longer triggers a password login attempt
+- `account list` shows what is saved for each account (cookie, token, password)
+- Existing `durbo.db` files are upgraded in place with a `cookie` column
+
 ## 2026-09-24
 
 - CAPTCHA login error (and README) now give step-by-step instructions for copying the token from the browser's developer tools; `account token` accepts a pasted `Token ` prefix

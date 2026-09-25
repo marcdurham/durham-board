@@ -11,7 +11,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/eshaffer321/monarchmoney-go/pkg/monarch"
+	"github.com/eshaffer321/monarch-go/v2/pkg/monarch"
 	"golang.org/x/term"
 )
 
@@ -68,12 +68,19 @@ func (a *authenticator) relogin(ctx context.Context, interactive bool) error {
 }
 
 // do runs fn, and if it fails because the token is missing or expired, logs
-// in again with the saved password and retries once.
+// in again with the saved password and retries once. A rejected browser
+// cookie can't be renewed here, so that error says how to save a new one.
 func (a *authenticator) do(ctx context.Context, interactive bool, fn func() error) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	err := fn()
-	if err == nil || !isAuthError(err) || a.account == nil || a.account.Password == "" {
+	if err == nil || !isAuthError(err) || a.account == nil {
+		return err
+	}
+	if a.account.Cookie != "" {
+		return fmt.Errorf("%w: the saved browser cookie for %s has expired or was rejected; save a fresh one with: durham-board account cookie %s", err, a.account.Email, a.account.Email)
+	}
+	if a.account.Password == "" {
 		return err
 	}
 	log.Printf("Token rejected (%v), logging in again", err)
@@ -99,7 +106,7 @@ func isAuthError(err error) bool {
 const accountUsage = `usage:
   durham-board account list               list saved accounts (* = active)
   durham-board account add <email>        save an account (prompts for password) and make it active
-  durham-board account token <email>      save a token (prompts; e.g. copied from a browser session) for an account
+  durham-board account cookie <email>     save a browser session cookie (prompts) for an account and make it active
   durham-board account use <email>        switch the dashboard to a saved account
   durham-board account remove <email>     delete a saved account and its token`
 
@@ -129,14 +136,24 @@ func runAccountCmd(store *Store, args []string, stdin io.Reader, stdout io.Write
 			return err
 		}
 		for _, a := range accounts {
-			mark, tok := " ", "no token"
+			mark := " "
 			if active != nil && active.Email == a.Email {
 				mark = "*"
 			}
-			if a.Token != "" {
-				tok = "token saved"
+			var saved []string
+			if a.Cookie != "" {
+				saved = append(saved, "cookie")
 			}
-			fmt.Fprintf(stdout, "%s %s (%s)\n", mark, a.Email, tok)
+			if a.Token != "" {
+				saved = append(saved, "token")
+			}
+			if a.Password != "" {
+				saved = append(saved, "password")
+			}
+			if len(saved) == 0 {
+				saved = append(saved, "nothing saved")
+			}
+			fmt.Fprintf(stdout, "%s %s (%s)\n", mark, a.Email, strings.Join(saved, ", "))
 		}
 		return nil
 	case "add":
@@ -160,20 +177,20 @@ func runAccountCmd(store *Store, args []string, stdin io.Reader, stdout io.Write
 		}
 		fmt.Fprintf(stdout, "Saved %s and made it the active account\n", email)
 		return nil
-	case "token":
+	case "cookie":
 		email, err := needEmail()
 		if err != nil {
 			return err
 		}
-		fmt.Fprint(stdout, "Monarch token: ")
-		token, err := readSecret(stdin, stdout)
+		fmt.Fprintln(stdout, cookieInstructions(email))
+		fmt.Fprint(stdout, "Monarch cookie: ")
+		raw, err := readSecret(stdin, stdout)
 		if err != nil {
 			return err
 		}
-		// Accept the whole Authorization header value ("Token abc...") too.
-		token = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(token), "Token "))
-		if token == "" {
-			return errors.New("token must not be empty")
+		cookie, err := parseCookie(raw)
+		if err != nil {
+			return err
 		}
 		if _, err := store.Account(email); errors.Is(err, errAccountNotFound) {
 			if err := store.SaveAccount(email, ""); err != nil {
@@ -182,13 +199,13 @@ func runAccountCmd(store *Store, args []string, stdin io.Reader, stdout io.Write
 		} else if err != nil {
 			return err
 		}
-		if err := store.SetToken(email, token); err != nil {
+		if err := store.SetCookie(email, cookie); err != nil {
 			return err
 		}
 		if err := store.SetActive(email); err != nil {
 			return err
 		}
-		fmt.Fprintf(stdout, "Saved token for %s and made it the active account\n", email)
+		fmt.Fprintf(stdout, "Saved cookie for %s and made it the active account\n", email)
 		return nil
 	case "use":
 		email, err := needEmail()
@@ -212,6 +229,33 @@ func runAccountCmd(store *Store, args []string, stdin io.Reader, stdout io.Write
 		return nil
 	}
 	return fmt.Errorf("unknown account command %q\n%s", args[0], accountUsage)
+}
+
+// cookieInstructions explains how to copy the session cookie that Monarch's
+// web app uses from the browser.
+func cookieInstructions(email string) string {
+	return fmt.Sprintf(`To copy your Monarch session cookie from a browser:
+  1. Log in at https://app.monarch.com in a desktop browser (tick "Stay signed in" if offered).
+  2. Open developer tools (F12, or Cmd+Option+I on a Mac) and select the Network tab.
+  3. Reload the page, type graphql in the filter box, and click any request to api.monarch.com/graphql.
+  4. Under Request Headers, find the Cookie header and copy its whole value (it contains sessionid=...; csrftoken=...).
+  5. Run: durham-board account cookie %s   and paste it at the prompt.`, email)
+}
+
+// parseCookie cleans up a pasted Cookie header, accepting a leading
+// "Cookie:" as copied from some browsers, and checks it has a session.
+func parseCookie(raw string) (string, error) {
+	c := strings.TrimSpace(raw)
+	if len(c) >= 7 && strings.EqualFold(c[:7], "cookie:") {
+		c = strings.TrimSpace(c[7:])
+	}
+	if c == "" {
+		return "", errors.New("cookie must not be empty")
+	}
+	if !strings.Contains(c, "sessionid=") {
+		return "", errors.New("that doesn't look like the Monarch Cookie header: it has no sessionid=... part. Copy the whole Cookie request header value")
+	}
+	return c, nil
 }
 
 // readSecret reads without echo on a terminal, or reads one line from piped

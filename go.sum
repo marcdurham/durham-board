@@ -2,8 +2,8 @@ github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/ebitengine/purego v0.9.1 h1:a/k2f2HQU3Pi399RPW1MOaZyhKJL9w/xFpKAg4q1s0A=
 github.com/ebitengine/purego v0.9.1/go.mod h1:iIjxzd6CiRiOG0UyXP+V1+jWqUXVjPKLAI0mRfJZTmQ=
-github.com/eshaffer321/monarchmoney-go v1.1.0 h1:tB7O6EuvUyoNTRfpnkf0thGrz6chkKKEW4sJ1NZo5A4=
-github.com/eshaffer321/monarchmoney-go v1.1.0/go.mod h1:ZKPCYT7NcsKGI+YpJ2EqPtfE3dKfuPbiTUrj6J84ot4=
+github.com/eshaffer321/monarch-go/v2 v2.1.0 h1:qsYIPv5ha/WEcwQLnbTdup2sg5F9L1724aM5FS3s2uI=
+github.com/eshaffer321/monarch-go/v2 v2.1.0/go.mod h1:0rdAjSetvYQ8wGkUdg4BsqN8jTMhJ4TbHAr6qhAzSk4=
 github.com/getsentry/sentry-go v0.35.1 h1:iopow6UVLE2aXu46xKVIs8Z9D/YZkJrHkgozrxa+tOQ=
 github.com/getsentry/sentry-go v0.35.1/go.mod h1:C55omcY9ChRQIUcVcGcs+Zdy4ZpQGvNJ7JYHIoSWOtE=
 github.com/go-errors/errors v1.4.2 h1:J6MZopCL4uSllY1OfXM374weqZFFItUbrImctkmUxIA=

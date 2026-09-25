@@ -24,12 +24,12 @@ func TestLoginFailedMessageShowsFullEmail(t *testing.T) {
 
 func TestLoginFailedMessageExplainsCaptcha(t *testing.T) {
 	msg := loginFailedMessage("a@x.com", errors.New("error: CAPTCHA_REQUIRED"))
-	if !strings.Contains(msg, "durham-board account token a@x.com") {
-		t.Errorf("CAPTCHA message should point to the token command: %s", msg)
+	if !strings.Contains(msg, "durham-board account cookie a@x.com") {
+		t.Errorf("CAPTCHA message should point to the cookie command: %s", msg)
 	}
-	for _, step := range []string{"Network tab", "Authorization", "app.monarchmoney.com"} {
+	for _, step := range []string{"Network tab", "Cookie header", "app.monarch.com", "api.monarch.com/graphql"} {
 		if !strings.Contains(msg, step) {
-			t.Errorf("CAPTCHA message should explain how to copy the token (missing %q): %s", step, msg)
+			t.Errorf("CAPTCHA message should explain how to copy the cookie (missing %q): %s", step, msg)
 		}
 	}
 }
