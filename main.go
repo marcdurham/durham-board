@@ -336,6 +336,21 @@ func main() {
 		}
 	}
 
+	if token == "" && !sessionExists {
+		// Session file is gone and no email/password given: cannot log in.
+		var missing []string
+		if email == "" {
+			missing = append(missing, "MONARCH_EMAIL")
+		}
+		if password == "" {
+			missing = append(missing, "MONARCH_PASSWORD")
+		}
+		if len(missing) > 0 {
+			log.Fatalf("No session file and missing credential(s): %s.\nSet them as environment variables to log in:\n  export %s\nThese are the email and password you use to log in to monarchmoney.com.\nIf you've forgotten your password, reset it at monarchmoney.com.",
+				strings.Join(missing, ", "), strings.Join(missing, "="))
+		}
+	}
+
 	var client *monarch.Client
 
 	if token != "" {
@@ -382,15 +397,12 @@ func main() {
 	}
 
 	cache := &Cache{}
-	log.Println("Loading initial data from Monarch Money...")
+	// Probe authentication up front so a stale/invalid session fails loudly
+	// here (with a clear message) instead of later as a confusing API error.
 	if err := refreshCache(ctx, client, cache); err != nil {
-		cache.mu.Lock()
-		cache.Error = fmt.Sprintf("Initial data load failed: %v", err)
-		cache.mu.Unlock()
-		log.Printf("warning: initial cache fill failed: %v", err)
-	} else {
-		log.Printf("Loaded %d accounts and %d transactions", len(cache.Accounts), len(cache.Transactions))
+		log.Fatalf("Authentication failed: %v.\n  If using a .monarch_session file, it is expired or invalid — log in again with MONARCH_EMAIL and MONARCH_PASSWORD to refresh it, or set MONARCH_TOKEN.\n  If using email/password, verify they are correct.", err)
 	}
+	log.Printf("Loaded %d accounts and %d transactions", len(cache.Accounts), len(cache.Transactions))
 
 	startRefreshLoop(ctx, client, cache)
 
