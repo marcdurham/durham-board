@@ -3,7 +3,6 @@
 ## 2026-09-24
 
 - Login logs and errors now show the full email address instead of a masked one, so typos in MONARCH_EMAIL are visible
-
 - Fix: email/password login was always rejected with "No credentials found" when no MONARCH_TOKEN was set; a token, a session file, or email+password now each suffice
 - Credential error now lists the three ways to authenticate; expired-session error says to delete/rename `.monarch_session` to log in again
 
