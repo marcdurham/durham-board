@@ -231,7 +231,12 @@ func loginFailedMessage(email string, err error) string {
 		return fmt.Sprintf("Login failed for %s: Monarch returned HTTP 404. This usually means invalid email or password (Monarch uses 404 instead of 401 as a security measure). Verify your MONARCH_EMAIL and MONARCH_PASSWORD.", email)
 	}
 	if strings.Contains(err.Error(), "CAPTCHA_REQUIRED") {
-		return fmt.Sprintf("Login failed for %s: Monarch is requiring a CAPTCHA, which can't be solved here. Log in at monarchmoney.com in a browser, copy the token, and save it with: durham-board account token %s", email, email)
+		return fmt.Sprintf("Login failed for %s: Monarch is requiring a CAPTCHA, which can't be solved here. Save a token from your browser instead:\n"+
+			"  1. Log in at https://app.monarchmoney.com in a desktop browser (solve the CAPTCHA there).\n"+
+			"  2. Open developer tools (F12, or Cmd+Option+I on a Mac) and select the Network tab.\n"+
+			"  3. Reload the page, type graphql in the filter box, and click any request to api.monarchmoney.com/graphql.\n"+
+			"  4. Under Request Headers, find Authorization: Token <long value> and copy the long value after \"Token \".\n"+
+			"  5. Run: durham-board account token %s   and paste it at the prompt.", email, email)
 	}
 	return fmt.Sprintf("Login failed for %s: %v", email, err)
 }

@@ -2,6 +2,7 @@
 
 ## 2026-09-24
 
+- CAPTCHA login error (and README) now give step-by-step instructions for copying the token from the browser's developer tools; `account token` accepts a pasted `Token ` prefix
 - Store Monarch accounts (email, password) and auth tokens in a local Turso database (`durbo.db`, override with `DURBO_DB`) instead of a `.monarch_session` file
 - Add `durham-board account add|list|use|token|remove` to manage saved accounts and switch the active one
 - Saved tokens are reused across restarts; an expired token triggers an automatic re-login with the saved password and the new token is stored

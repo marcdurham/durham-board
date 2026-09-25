@@ -194,6 +194,13 @@ func TestAccountCommand(t *testing.T) {
 	if a, _ := s.ActiveAccount(); a == nil || a.Email != "t@x.com" || a.Token != "tok123" || a.Password != "" {
 		t.Errorf("token command: got %+v", a)
 	}
+	// A pasted "Token " header prefix is stripped.
+	if _, err := run("Token tok789\n", "token", "t@x.com"); err != nil {
+		t.Fatal(err)
+	}
+	if a, _ := s.Account("t@x.com"); a.Token != "tok789" {
+		t.Errorf("Token prefix not stripped, got %q", a.Token)
+	}
 	// Setting a token on an existing account keeps its password.
 	if _, err := run("tok456\n", "token", "b@x.com"); err != nil {
 		t.Fatal(err)

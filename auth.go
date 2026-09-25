@@ -170,7 +170,8 @@ func runAccountCmd(store *Store, args []string, stdin io.Reader, stdout io.Write
 		if err != nil {
 			return err
 		}
-		token = strings.TrimSpace(token)
+		// Accept the whole Authorization header value ("Token abc...") too.
+		token = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(token), "Token "))
 		if token == "" {
 			return errors.New("token must not be empty")
 		}

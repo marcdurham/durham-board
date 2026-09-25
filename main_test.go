@@ -27,4 +27,9 @@ func TestLoginFailedMessageExplainsCaptcha(t *testing.T) {
 	if !strings.Contains(msg, "durham-board account token a@x.com") {
 		t.Errorf("CAPTCHA message should point to the token command: %s", msg)
 	}
+	for _, step := range []string{"Network tab", "Authorization", "app.monarchmoney.com"} {
+		if !strings.Contains(msg, step) {
+			t.Errorf("CAPTCHA message should explain how to copy the token (missing %q): %s", step, msg)
+		}
+	}
 }

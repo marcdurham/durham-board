@@ -54,7 +54,13 @@ If only one account is saved it is used automatically; with several, pick one wi
 
 ### CAPTCHA
 
-Monarch sometimes requires a CAPTCHA for password logins, which the app can't solve. When that happens, log in at monarchmoney.com in a browser, copy the auth token, and save it with `durham-board account token you@example.com`.
+Monarch sometimes requires a CAPTCHA for password logins, which the app can't solve. When that happens, save a token from your browser instead:
+
+1. Log in at <https://app.monarchmoney.com> in a desktop browser (solve the CAPTCHA there).
+2. Open developer tools (F12, or Cmd+Option+I on a Mac) and select the **Network** tab.
+3. Reload the page, type `graphql` in the filter box, and click any request to `api.monarchmoney.com/graphql`.
+4. Under **Request Headers**, find `Authorization: Token <long value>` and copy the long value after `Token `.
+5. Run `durham-board account token you@example.com` and paste it at the prompt (pasting the `Token ` prefix too is fine).
 
 ## Configuration
 
