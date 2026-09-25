@@ -18,7 +18,6 @@ import (
 	"github.com/eshaffer321/monarchmoney-go/pkg/monarch"
 )
 
-const sessionFile = ".monarch_session"
 const defaultPullMinutes = 5
 
 type Config struct {
@@ -123,7 +122,7 @@ func refreshCache(ctx context.Context, client *monarch.Client, cache *Cache) err
 	return nil
 }
 
-func startRefreshLoop(ctx context.Context, client *monarch.Client, cache *Cache) {
+func startRefreshLoop(ctx context.Context, client *monarch.Client, auth *authenticator, cache *Cache) {
 	interval := pullInterval()
 	log.Printf("Cache refresh interval: %v", interval)
 	ticker := time.NewTicker(interval)
@@ -132,7 +131,8 @@ func startRefreshLoop(ctx context.Context, client *monarch.Client, cache *Cache)
 		for {
 			select {
 			case <-ticker.C:
-				if err := refreshCache(ctx, client, cache); err != nil {
+				err := auth.do(ctx, false, func() error { return refreshCache(ctx, client, cache) })
+				if err != nil {
 					cache.mu.Lock()
 					cache.Error = err.Error()
 					cache.mu.Unlock()
@@ -230,6 +230,9 @@ func loginFailedMessage(email string, err error) string {
 	if strings.Contains(err.Error(), "status 404") {
 		return fmt.Sprintf("Login failed for %s: Monarch returned HTTP 404. This usually means invalid email or password (Monarch uses 404 instead of 401 as a security measure). Verify your MONARCH_EMAIL and MONARCH_PASSWORD.", email)
 	}
+	if strings.Contains(err.Error(), "CAPTCHA_REQUIRED") {
+		return fmt.Sprintf("Login failed for %s: Monarch is requiring a CAPTCHA, which can't be solved here. Log in at monarchmoney.com in a browser, copy the token, and save it with: durham-board account token %s", email, email)
+	}
 	return fmt.Sprintf("Login failed for %s: %v", email, err)
 }
 
@@ -301,86 +304,97 @@ func handleDashboard(tmpl *template.Template, cache *Cache, cfg *Config) http.Ha
 	}
 }
 
-// missingCredentials returns the env vars that must be set to authenticate.
-// A token or an existing session file is sufficient on its own; otherwise
-// both email and password are needed to log in.
-func missingCredentials(token, email, password string, sessionExists bool) []string {
-	if token != "" || sessionExists {
-		return nil
+func dbPath() string {
+	if p := os.Getenv("DURBO_DB"); p != "" {
+		return p
 	}
-	var missing []string
-	if email == "" {
-		missing = append(missing, "MONARCH_EMAIL")
+	return defaultDBPath
+}
+
+// activeAccount picks the account to log in as. MONARCH_EMAIL and
+// MONARCH_PASSWORD, when both set, are saved to the store and made active so
+// later runs don't need them.
+func activeAccount(store *Store, email, password string) (*Account, error) {
+	if email != "" && password != "" {
+		if err := store.SaveAccount(email, password); err != nil {
+			return nil, fmt.Errorf("saving account %s: %w", email, err)
+		}
+		if err := store.SetActive(email); err != nil {
+			return nil, err
+		}
+	} else if email != "" || password != "" {
+		log.Printf("warning: MONARCH_EMAIL and MONARCH_PASSWORD must both be set to save an account; ignoring")
 	}
-	if password == "" {
-		missing = append(missing, "MONARCH_PASSWORD")
-	}
-	return missing
+	return store.ActiveAccount()
 }
 
 func main() {
 	ctx := context.Background()
+
+	store, err := openStore(dbPath())
+	if err != nil {
+		log.Fatalf("%v", err)
+	}
+	defer store.Close()
+
+	if len(os.Args) > 1 {
+		if os.Args[1] != "account" {
+			log.Fatalf("unknown command %q\n%s", os.Args[1], accountUsage)
+		}
+		if err := runAccountCmd(store, os.Args[2:], os.Stdin, os.Stdout); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
 
 	cfg, err := loadConfig("durbo.json")
 	if err != nil {
 		log.Fatalf("loading config: %v", err)
 	}
 
+	account, err := activeAccount(store, os.Getenv("MONARCH_EMAIL"), os.Getenv("MONARCH_PASSWORD"))
+	if err != nil {
+		log.Fatalf("loading account: %v", err)
+	}
 	token := os.Getenv("MONARCH_TOKEN")
-	email := os.Getenv("MONARCH_EMAIL")
-	password := os.Getenv("MONARCH_PASSWORD")
-
-	_, sessionErr := os.Stat(sessionFile)
-	sessionExists := sessionErr == nil
-
-	if missing := missingCredentials(token, email, password, sessionExists); len(missing) > 0 {
-		log.Printf("MONARCH_TOKEN = %q", token)
-		log.Printf("MONARCH_EMAIL = %q", email)
-		log.Printf("MONARCH_PASSWORD %s", func() string {
-			if password == "" {
-				return "(empty)"
-			}
-			return "= set"
-		}())
-		log.Fatalf("No credentials found. Missing: %s.\nDo one of:\n  1. Set MONARCH_EMAIL and MONARCH_PASSWORD (the email and password you use to log in to monarchmoney.com)\n  2. Set MONARCH_TOKEN\n  3. Place a valid .monarch_session file in the working directory",
-			strings.Join(missing, ", "))
+	if token == "" && account == nil {
+		log.Fatalf("No Monarch account configured in %s.\nDo one of:\n  1. Run: durham-board account add <email>   (saves email/password; the token is kept after the first login)\n  2. Set MONARCH_EMAIL and MONARCH_PASSWORD once (they are saved to %s)\n  3. Set MONARCH_TOKEN\nIf several accounts are saved, pick one with: durham-board account use <email>", dbPath(), dbPath())
 	}
 
-	var client *monarch.Client
-
-	if token != "" {
-		client, err = monarch.NewClientWithToken(token)
-	} else {
-		client, err = monarch.NewClient(&monarch.ClientOptions{
-			SessionFile: sessionFile,
-			Timeout:     30 * time.Second,
-		})
-	}
+	client, err := monarch.NewClient(&monarch.ClientOptions{Timeout: 30 * time.Second})
 	if err != nil {
 		log.Fatalf("creating monarch client: %v", err)
 	}
 
-	if token == "" && !sessionExists {
-		log.Printf("No session file found — logging in as %s...", email)
-		if err := client.Auth.LoginInteractive(ctx, email, password); err != nil {
-			log.Fatal(loginFailedMessage(email, err))
+	if token != "" {
+		log.Printf("Using MONARCH_TOKEN")
+		account = nil
+		client.SetToken(token)
+	} else {
+		log.Printf("Using account %s", account.Email)
+		if account.Token != "" {
+			client.SetToken(account.Token)
 		}
-		if err := client.Auth.SaveSession(sessionFile); err != nil {
-			log.Printf("warning: could not save session: %v", err)
-		} else {
-			log.Printf("Session saved to %s", sessionFile)
+	}
+	auth := newAuthenticator(client, store, account)
+
+	if account != nil && account.Token == "" {
+		if err := auth.relogin(ctx, true); err != nil {
+			log.Fatal(err)
 		}
 	}
 
 	cache := &Cache{}
 	// Probe authentication up front so a stale/invalid session fails loudly
 	// here (with a clear message) instead of later as a confusing API error.
-	if err := refreshCache(ctx, client, cache); err != nil {
-		log.Fatalf("Authentication failed: %v.\n  If using a .monarch_session file, it is expired or invalid — to log in again, delete or rename %s and run with MONARCH_EMAIL and MONARCH_PASSWORD set (a fresh session file will be saved), or set MONARCH_TOKEN.\n  If using email/password, verify they are correct.", err, sessionFile)
+	// A stored token that has expired is replaced by logging in again.
+	if err := auth.do(ctx, true, func() error { return refreshCache(ctx, client, cache) }); err != nil {
+		log.Fatalf("Loading data from Monarch failed: %v.\n  If the password changed, update it with: durham-board account add <email>\n  If using MONARCH_TOKEN, it may be expired.", err)
 	}
 	log.Printf("Loaded %d accounts and %d transactions", len(cache.Accounts), len(cache.Transactions))
 
-	startRefreshLoop(ctx, client, cache)
+	startRefreshLoop(ctx, client, auth, cache)
 
 	tmpl, err := template.New("dashboard.html").Funcs(template.FuncMap{
 		"formatMoney": formatMoney,

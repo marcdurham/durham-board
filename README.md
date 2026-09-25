@@ -12,7 +12,7 @@ A personal finance dashboard, designed to be displayed on a kiosk-like monitor o
 
 ## Requirements
 
-- Go 1.21+
+- Go 1.24+ (no CGO needed)
 - A Monarch Money account
 
 ## Running
@@ -31,29 +31,30 @@ Open [http://localhost:8082](http://localhost:8082) in your browser.
 
 ## Authentication
 
-The app supports three authentication methods, tried in this order:
+Monarch accounts and their auth tokens are stored in a local [Turso](https://turso.tech) database file, `durbo.db` (override the path with `DURBO_DB`). No session file is used. After the first successful login the token is saved and reused, and if it expires the app logs in again with the saved password and stores the new token — you don't have to log in by hand.
 
-### Option 1 — API Token (recommended)
-
-Set the `MONARCH_TOKEN` environment variable to your Monarch Money API token.
+### Managing accounts
 
 ```bash
-MONARCH_TOKEN=your_token_here go run main.go
+durham-board account add you@example.com     # prompts for password, makes it active
+durham-board account list                    # * marks the active account
+durham-board account use other@example.com   # switch accounts (restart the dashboard)
+durham-board account token you@example.com   # save a token directly (see CAPTCHA below)
+durham-board account remove other@example.com
 ```
 
-### Option 2 — Session file
+With `go run`, use `go run . account add you@example.com`.
 
-Place a `.monarch_session` file in the project root. This file is created automatically when you use email/password login (see Option 3). On subsequent runs the session file is reused, so you won't need to log in again.
+If only one account is saved it is used automatically; with several, pick one with `account use`.
 
-### Option 3 — Email + password (first-time login)
+### Environment variables (optional)
 
-Set `MONARCH_EMAIL` and `MONARCH_PASSWORD`. The app will log in, then save the session to `.monarch_session` for future runs.
+- `MONARCH_EMAIL` + `MONARCH_PASSWORD` — if both are set, the account is saved to `durbo.db` and made active, so you can drop them afterwards.
+- `MONARCH_TOKEN` — use this token for this run instead of the stored account (not saved).
 
-```bash
-MONARCH_EMAIL=you@example.com MONARCH_PASSWORD=secret go run main.go
-```
+### CAPTCHA
 
-If none of the above are configured the app exits with an error explaining what's missing.
+Monarch sometimes requires a CAPTCHA for password logins, which the app can't solve. When that happens, log in at monarchmoney.com in a browser, copy the auth token, and save it with `durham-board account token you@example.com`.
 
 ## Configuration
 
@@ -85,9 +86,10 @@ cp durbo.example.json durbo.json
 | Variable | Default | Description |
 |---|---|---|
 | `PORT` | `8082` | HTTP port to listen on |
-| `MONARCH_TOKEN` | — | Monarch Money API token |
-| `MONARCH_EMAIL` | — | Email for password-based login |
-| `MONARCH_PASSWORD` | — | Password for password-based login |
+| `DURBO_DB` | `durbo.db` | Path to the local Turso database holding accounts and tokens |
+| `MONARCH_TOKEN` | — | Monarch Money API token (overrides the stored account for this run) |
+| `MONARCH_EMAIL` | — | Email to save to the database and make active (with `MONARCH_PASSWORD`) |
+| `MONARCH_PASSWORD` | — | Password to save to the database (with `MONARCH_EMAIL`) |
 | `DURBO_DATA_PULL_MINUTES` | `5` | How often (in minutes) to refresh data from Monarch Money |
 
 ## Endpoints
@@ -114,5 +116,5 @@ go build -o durham-board .
 
 ## Security notes
 
-- `.monarch_session` contains a live auth token — it is gitignored by default. Do not commit it.
+- `durbo.db` contains your Monarch passwords and live auth tokens in plain text — it is gitignored by default. Do not commit or share it, and keep it on the local machine.
 - `durbo.json` may contain personal financial category names — also gitignored.

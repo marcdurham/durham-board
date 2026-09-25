@@ -1,0 +1,227 @@
+package main
+
+import (
+	"bytes"
+	"context"
+	"errors"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func newTestStore(t *testing.T) *Store {
+	t.Helper()
+	s, err := openStore(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { s.Close() })
+	return s
+}
+
+func TestStoreAccountsAndSwitching(t *testing.T) {
+	s := newTestStore(t)
+
+	if a, err := s.ActiveAccount(); err != nil || a != nil {
+		t.Fatalf("empty store: got %v, %v; want nil, nil", a, err)
+	}
+
+	if err := s.SaveAccount("a@x.com", "pw1"); err != nil {
+		t.Fatal(err)
+	}
+	// A single saved account is used even without an explicit choice.
+	if a, _ := s.ActiveAccount(); a == nil || a.Email != "a@x.com" {
+		t.Fatalf("single account should be active, got %+v", a)
+	}
+
+	if err := s.SaveAccount("b@x.com", "pw2"); err != nil {
+		t.Fatal(err)
+	}
+	if a, _ := s.ActiveAccount(); a != nil {
+		t.Fatalf("two accounts and none chosen should be ambiguous, got %+v", a)
+	}
+
+	if err := s.SetActive("b@x.com"); err != nil {
+		t.Fatal(err)
+	}
+	if a, _ := s.ActiveAccount(); a == nil || a.Email != "b@x.com" || a.Password != "pw2" {
+		t.Fatalf("got %+v, want b@x.com", a)
+	}
+	if err := s.SetActive("a@x.com"); err != nil {
+		t.Fatal(err)
+	}
+	if a, _ := s.ActiveAccount(); a.Email != "a@x.com" {
+		t.Fatalf("switch failed, got %s", a.Email)
+	}
+
+	if err := s.SetActive("nobody@x.com"); !errors.Is(err, errAccountNotFound) {
+		t.Fatalf("SetActive unknown: got %v", err)
+	}
+
+	if err := s.RemoveAccount("a@x.com"); err != nil {
+		t.Fatal(err)
+	}
+	// Removing the active account falls back to the single remaining one.
+	if a, _ := s.ActiveAccount(); a == nil || a.Email != "b@x.com" {
+		t.Fatalf("after removing active, got %+v", a)
+	}
+}
+
+func TestStoreTokenKeptUnlessPasswordChanges(t *testing.T) {
+	s := newTestStore(t)
+	s.SaveAccount("a@x.com", "pw")
+	if err := s.SetToken("a@x.com", "tok"); err != nil {
+		t.Fatal(err)
+	}
+
+	s.SaveAccount("a@x.com", "pw")
+	if a, _ := s.Account("a@x.com"); a.Token != "tok" {
+		t.Errorf("same password should keep token, got %q", a.Token)
+	}
+
+	s.SaveAccount("a@x.com", "new")
+	if a, _ := s.Account("a@x.com"); a.Token != "" || a.Password != "new" {
+		t.Errorf("password change should clear token, got %+v", a)
+	}
+
+	if err := s.SetToken("nobody@x.com", "t"); !errors.Is(err, errAccountNotFound) {
+		t.Errorf("SetToken unknown: got %v", err)
+	}
+}
+
+func TestStorePersistsAcrossOpens(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "p.db")
+	s, err := openStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.SaveAccount("a@x.com", "pw")
+	s.SetToken("a@x.com", "tok")
+	s.SetActive("a@x.com")
+	s.Close()
+
+	s, err = openStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	a, err := s.ActiveAccount()
+	if err != nil || a == nil || a.Token != "tok" {
+		t.Fatalf("got %+v, %v", a, err)
+	}
+}
+
+func TestActiveAccountSavesEnvCredentials(t *testing.T) {
+	s := newTestStore(t)
+	s.SaveAccount("old@x.com", "pw")
+	s.SetActive("old@x.com")
+
+	a, err := activeAccount(s, "new@x.com", "secret")
+	if err != nil || a == nil || a.Email != "new@x.com" || a.Password != "secret" {
+		t.Fatalf("got %+v, %v", a, err)
+	}
+	// Next run without env vars still uses the saved account.
+	a, _ = activeAccount(s, "", "")
+	if a == nil || a.Email != "new@x.com" {
+		t.Fatalf("env account not remembered, got %+v", a)
+	}
+}
+
+func TestAuthenticatorRelogsInOnExpiredToken(t *testing.T) {
+	s := newTestStore(t)
+	s.SaveAccount("a@x.com", "pw")
+	s.SetToken("a@x.com", "stale")
+	acct, _ := s.Account("a@x.com")
+
+	logins := 0
+	auth := &authenticator{store: s, account: acct,
+		login: func(_ context.Context, email, password string, _ bool) (string, error) {
+			logins++
+			if email != "a@x.com" || password != "pw" {
+				t.Errorf("login with %s/%s", email, password)
+			}
+			return "fresh", nil
+		}}
+
+	calls := 0
+	err := auth.do(context.Background(), false, func() error {
+		calls++
+		if calls == 1 {
+			return errors.New("fetching accounts: session expired")
+		}
+		return nil
+	})
+	if err != nil || calls != 2 || logins != 1 {
+		t.Fatalf("err=%v calls=%d logins=%d", err, calls, logins)
+	}
+	if a, _ := s.Account("a@x.com"); a.Token != "fresh" {
+		t.Errorf("new token not saved, got %q", a.Token)
+	}
+
+	// Non-auth errors are returned without logging in.
+	err = auth.do(context.Background(), false, func() error { return errors.New("connection refused") })
+	if err == nil || logins != 1 {
+		t.Errorf("non-auth error: err=%v logins=%d", err, logins)
+	}
+}
+
+func TestAccountCommand(t *testing.T) {
+	s := newTestStore(t)
+	run := func(stdin string, args ...string) (string, error) {
+		var out bytes.Buffer
+		err := runAccountCmd(s, args, strings.NewReader(stdin), &out)
+		return out.String(), err
+	}
+
+	if _, err := run("pw1\n", "add", "a@x.com"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run("pw2\n", "add", "b@x.com"); err != nil {
+		t.Fatal(err)
+	}
+	out, _ := run("", "list")
+	if !strings.Contains(out, "* b@x.com") || !strings.Contains(out, "  a@x.com") {
+		t.Errorf("list after add should mark b active:\n%s", out)
+	}
+	if a, _ := s.Account("b@x.com"); a.Password != "pw2" {
+		t.Errorf("password not read from stdin, got %q", a.Password)
+	}
+
+	// Token-only account, e.g. when Monarch demands a CAPTCHA for password login.
+	if _, err := run(" tok123 \n", "token", "t@x.com"); err != nil {
+		t.Fatal(err)
+	}
+	if a, _ := s.ActiveAccount(); a == nil || a.Email != "t@x.com" || a.Token != "tok123" || a.Password != "" {
+		t.Errorf("token command: got %+v", a)
+	}
+	// Setting a token on an existing account keeps its password.
+	if _, err := run("tok456\n", "token", "b@x.com"); err != nil {
+		t.Fatal(err)
+	}
+	if a, _ := s.Account("b@x.com"); a.Token != "tok456" || a.Password != "pw2" {
+		t.Errorf("token on existing account: got %+v", a)
+	}
+
+	if _, err := run("", "use", "a@x.com"); err != nil {
+		t.Fatal(err)
+	}
+	if out, _ := run("", "list"); !strings.Contains(out, "* a@x.com") {
+		t.Errorf("use did not switch:\n%s", out)
+	}
+
+	if _, err := run("\n", "add", "c@x.com"); err == nil {
+		t.Error("empty password should be rejected")
+	}
+	if _, err := run("", "use"); err == nil {
+		t.Error("use without email should fail")
+	}
+	if _, err := run("", "bogus"); err == nil {
+		t.Error("unknown subcommand should fail")
+	}
+	if _, err := run("", "remove", "a@x.com"); err != nil {
+		t.Fatal(err)
+	}
+	if out, _ := run("", "list"); strings.Contains(out, "a@x.com") {
+		t.Errorf("remove did not delete:\n%s", out)
+	}
+}
