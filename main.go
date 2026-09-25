@@ -222,14 +222,15 @@ func recurringVendorSummary(txs []*monarch.Transaction, vendors []RecurringVendo
 	}
 }
 
-// maskEmail hides everything before the @ in an email so it can be logged safely.
-// e.g. "alice+test@example.com" → "a***e@example.com"
-func maskEmail(email string) string {
-	at := strings.LastIndex(email, "@")
-	if at <= 1 {
-		return "***"
+// loginFailedMessage explains a failed email/password login, including the
+// full email so the user can spot a typo in MONARCH_EMAIL.
+func loginFailedMessage(email string, err error) string {
+	// Monarch returns 404 for invalid credentials (security measure).
+	// Surface a clearer message so users don't think the API is down.
+	if strings.Contains(err.Error(), "status 404") {
+		return fmt.Sprintf("Login failed for %s: Monarch returned HTTP 404. This usually means invalid email or password (Monarch uses 404 instead of 401 as a security measure). Verify your MONARCH_EMAIL and MONARCH_PASSWORD.", email)
 	}
-	return string(email[0]) + "***" + email[at:]
+	return fmt.Sprintf("Login failed for %s: %v", email, err)
 }
 
 func formatMoney(v float64) string {
@@ -360,16 +361,9 @@ func main() {
 	}
 
 	if token == "" && !sessionExists {
-		maskedEmail := maskEmail(email)
-		log.Printf("No session file found — logging in as %s...", maskedEmail)
+		log.Printf("No session file found — logging in as %s...", email)
 		if err := client.Auth.LoginInteractive(ctx, email, password); err != nil {
-			errMsg := err.Error()
-			// Monarch returns 404 for invalid credentials (security measure).
-			// Surface a clearer message so users don't think the API is down.
-			if strings.Contains(errMsg, "status 404") {
-				log.Fatalf("Login failed for %s: Monarch returned HTTP 404. This usually means invalid email or password (Monarch uses 404 instead of 401 as a security measure). Verify your MONARCH_EMAIL and MONARCH_PASSWORD.", maskedEmail)
-			}
-			log.Fatalf("Login failed for %s: %v", maskedEmail, err)
+			log.Fatal(loginFailedMessage(email, err))
 		}
 		if err := client.Auth.SaveSession(sessionFile); err != nil {
 			log.Printf("warning: could not save session: %v", err)

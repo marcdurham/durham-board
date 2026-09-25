@@ -1,7 +1,9 @@
 package main
 
 import (
+	"errors"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -28,5 +30,21 @@ func TestMissingCredentials(t *testing.T) {
 				t.Errorf("got %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestLoginFailedMessageShowsFullEmail(t *testing.T) {
+	const email = "alice+test@example.com"
+	for _, err := range []error{
+		errors.New("request failed: status 404"),
+		errors.New("connection refused"),
+	} {
+		msg := loginFailedMessage(email, err)
+		if !strings.Contains(msg, email) {
+			t.Errorf("message for %q does not contain full email %q: %s", err, email, msg)
+		}
+	}
+	if msg := loginFailedMessage(email, errors.New("status 404")); !strings.Contains(msg, "invalid email or password") {
+		t.Errorf("404 message should explain invalid credentials: %s", msg)
 	}
 }
