@@ -315,18 +315,25 @@ func main() {
 	_, sessionErr := os.Stat(sessionFile)
 	sessionExists := sessionErr == nil
 
-	if token == "" && email == "" && !sessionExists {
-		var hints []string
-	if token == "" {
-		hints = append(hints, "MONARCH_TOKEN=<your-api-token>")
-	}
-	if email == "" && password == "" {
-		hints = append(hints, "MONARCH_EMAIL=<email> and MONARCH_PASSWORD=<password>")
-	}
-	if !sessionExists {
-		hints = append(hints, "or place a .monarch_session file in the working directory")
-	}
-	log.Fatalf("No credentials found. Set one of:\n  %s", strings.Join(hints, "\n  "))
+	if token == "" && !sessionExists {
+		// No token and no cached session: we cannot authenticate at all.
+		log.Printf("MONARCH_TOKEN = %q", token)
+		log.Printf("MONARCH_EMAIL = %q", email)
+		log.Printf("MONARCH_PASSWORD %s", func() string { if password == "" { return "(empty)" }; return "= set" }())
+		var missing []string
+		if token == "" {
+			missing = append(missing, "MONARCH_TOKEN")
+		}
+		if email == "" {
+			missing = append(missing, "MONARCH_EMAIL")
+		}
+		if password == "" {
+			missing = append(missing, "MONARCH_PASSWORD")
+		}
+		if len(missing) > 0 {
+			log.Fatalf("No credentials found. Set one of the following as environment variables:\n  %s\n  or place a valid .monarch_session file in the working directory\nThese are the email and password you use to log in to monarchmoney.com.",
+				strings.Join(missing, "\n  "))
+		}
 	}
 
 	var client *monarch.Client
